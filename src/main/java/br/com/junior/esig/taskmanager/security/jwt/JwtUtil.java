@@ -1,6 +1,7 @@
 package br.com.junior.esig.taskmanager.security.jwt;
 
 import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,14 +14,17 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.secret:MySuperSecretKeyForJWTGenerationInTaskManagerApplication2024}")
+    // Chave secreta em Base64 (Gerada para teste, em prod estaria no application.properties)
+    // Essa string abaixo é "MinhaChaveSecretaSuperSeguraParaOProjetoEsig2025" convertida para Base64
+    @Value("${jwt.secret:TWluaGFDaGF2ZVNlY3JldGFTdXBlclNlZ3VyYVBhcmFPUHJvamV0b0VzaWcyMDI1}")
     private String secret;
 
-    @Value("${jwt.expiration:86400000}") // 24 horas
+    @Value("${jwt.expiration:86400000}")
     private Long expiration;
 
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(secret.getBytes());
+        byte[] keyBytes = Decoders.BASE64.decode(secret);
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 
     public String generateToken(String username) {
@@ -39,18 +43,14 @@ public class JwtUtil {
                     .build()
                     .parseSignedClaims(token);
             return true;
-        } catch (SecurityException e) {
-            log.error("Assinatura JWT inválida: {}", e.getMessage());
-        } catch (MalformedJwtException e) {
-            log.error("Token JWT inválido: {}", e.getMessage());
+        } catch (SecurityException | MalformedJwtException e) {
+            log.warn("Assinatura ou Token JWT inválido: {}", e.getMessage());
         } catch (ExpiredJwtException e) {
-            log.error("Token JWT expirado: {}", e.getMessage());
+            log.warn("Token JWT expirado: {}", e.getMessage());
         } catch (UnsupportedJwtException e) {
             log.error("Token JWT não suportado: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
             log.error("Claims JWT vazios: {}", e.getMessage());
-        } catch (JwtException e) {
-            log.error("Erro JWT: {}", e.getMessage());
         }
         return false;
     }

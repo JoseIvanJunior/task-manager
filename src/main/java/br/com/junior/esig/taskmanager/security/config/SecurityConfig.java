@@ -33,15 +33,17 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // PÚBLICO: Apenas login e registro de usuários comuns
+                        .requestMatchers("/auth/login", "/auth/register").permitAll()
+
+                        // RESTRITO: Apenas ADMIN pode criar novos admins
+                        .requestMatchers("/auth/create-admin").hasRole("ADMIN")
+
+                        // DOCUMENTAÇÃO (Swagger)
                         .requestMatchers(
-                                "/auth/**",
-                                "/api/auth/**",
                                 "/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
-                                "/swagger-resources/**",
-                                "/webjars/**",
-                                "/configuration/**",
                                 "/v3/api-docs/**"
                         ).permitAll()
                         .anyRequest().authenticated()
@@ -54,23 +56,9 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-
-        config.setAllowedOrigins(List.of(
-                "http://localhost:4200",
-                "http://localhost:3000",
-                "http://localhost:8081"
-        ));
-
+        config.setAllowedOrigins(List.of("http://localhost:4200", "http://localhost:8081"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-
-        config.setAllowedHeaders(List.of(
-                "Authorization",
-                "Content-Type",
-                "Accept",
-                "X-Requested-With",
-                "Cache-Control"
-        ));
-
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Requested-With", "Cache-Control"));
         config.setExposedHeaders(List.of("Authorization", "X-Total-Count"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

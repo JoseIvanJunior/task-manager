@@ -27,12 +27,12 @@ public class CustomUserDetailsService implements UserDetailsService {
                     return new UsernameNotFoundException("Usuário não encontrado: " + username);
                 });
 
-        log.debug("Usuário encontrado: {}", username);
+        log.info("Usuário encontrado: {} com perfil: {}", username, user.getRole());
 
         return new org.springframework.security.core.userdetails.User(
                 user.getUsername(),
                 user.getPassword(),
-                Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER"))
+                Collections.singletonList(new SimpleGrantedAuthority(user.getRole().name()))
         );
     }
 }

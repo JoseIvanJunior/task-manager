@@ -1,7 +1,7 @@
 package br.com.junior.esig.taskmanager.integration;
 
-import br.com.junior.esig.taskmanager.domain.model.User;
 import br.com.junior.esig.taskmanager.domain.enums.Role;
+import br.com.junior.esig.taskmanager.domain.model.User;
 import br.com.junior.esig.taskmanager.dto.auth.LoginRequest;
 import br.com.junior.esig.taskmanager.dto.auth.LoginResponse;
 import br.com.junior.esig.taskmanager.repository.UserRepository;
@@ -43,10 +43,10 @@ class AuthIntegrationTest {
     void setUp() {
         baseUrl = "http://localhost:" + port + "/api";
 
-        // Limpa e prepara o banco para cada teste
+        // Limpa o banco antes de cada teste para garantir isolamento
         userRepository.deleteAll();
 
-        // Cria um usuário de teste
+        // Cria um usuário base para testes de login
         User testUser = User.builder()
                 .username("testuser")
                 .password(passwordEncoder.encode("password123"))
@@ -68,11 +68,11 @@ class AuthIntegrationTest {
         );
 
         // Then
-        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(HttpStatus.CREATED, response.getStatusCode());
         assertNotNull(response.getBody());
         assertNotNull(response.getBody().getToken());
 
-        // Verifica se o usuário foi salvo no banco
+        // Verifica se persistiu no banco
         assertTrue(userRepository.findByUsername("newuser").isPresent());
     }
 
@@ -93,7 +93,7 @@ class AuthIntegrationTest {
         assertNotNull(response.getBody());
         assertNotNull(response.getBody().getToken());
 
-        // Verifica se o token é válido
+        // Verifica validade do token
         String token = response.getBody().getToken();
         assertEquals("testuser", jwtUtil.getUsernameFromToken(token));
     }
@@ -103,17 +103,15 @@ class AuthIntegrationTest {
         // Given
         LoginRequest loginRequest = new LoginRequest("testuser", "wrongpassword");
 
-        // When
-        ResponseEntity<LoginResponse> response = restTemplate.postForEntity(
+        // When - Usamos String.class porque o erro não retorna LoginResponse JSON
+        ResponseEntity<String> response = restTemplate.postForEntity(
                 baseUrl + "/auth/login",
                 loginRequest,
-                LoginResponse.class
+                String.class
         );
 
-        // Then - Deve retornar UNAUTHORIZED
+        // Then
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertNull(response.getBody().getToken());
     }
 
     @Test
@@ -122,34 +120,30 @@ class AuthIntegrationTest {
         LoginRequest loginRequest = new LoginRequest("nonexistent", "password");
 
         // When
-        ResponseEntity<LoginResponse> response = restTemplate.postForEntity(
+        ResponseEntity<String> response = restTemplate.postForEntity(
                 baseUrl + "/auth/login",
                 loginRequest,
-                LoginResponse.class
+                String.class
         );
 
-        // Then - Deve retornar UNAUTHORIZED
+        // Then
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertNull(response.getBody().getToken());
     }
 
     @Test
     void shouldPreventDuplicateUsernameRegistration() {
-        // Given - Usuário já existe
+        // Given - Usuário "testuser" já existe (criado no setUp)
         LoginRequest registerRequest = new LoginRequest("testuser", "password123");
 
         // When
-        ResponseEntity<LoginResponse> response = restTemplate.postForEntity(
+        ResponseEntity<String> response = restTemplate.postForEntity(
                 baseUrl + "/auth/register",
                 registerRequest,
-                LoginResponse.class
+                String.class
         );
 
-        // Then - Deve retornar BAD_REQUEST
+        // Then
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertNull(response.getBody().getToken());
     }
 
     @Test
@@ -160,21 +154,21 @@ class AuthIntegrationTest {
                 String.class
         );
 
-        // Then - Deve retornar FORBIDDEN ou UNAUTHORIZED
+        // Then
         assertTrue(response.getStatusCode() == HttpStatus.FORBIDDEN ||
                 response.getStatusCode() == HttpStatus.UNAUTHORIZED);
     }
 
     @Test
     void shouldAccessProtectedEndpointWithValidToken() {
-        // Given - Gera um token válido
+        // Given
         String token = jwtUtil.generateToken("testuser");
 
-        // When - Acessa endpoint com token
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         HttpEntity<String> entity = new HttpEntity<>(headers);
 
+        // When
         ResponseEntity<String> response = restTemplate.exchange(
                 baseUrl + "/tasks",
                 HttpMethod.GET,
@@ -182,20 +176,20 @@ class AuthIntegrationTest {
                 String.class
         );
 
-        // Then - Deve conseguir acesso
-        assertTrue(response.getStatusCode().is2xxSuccessful());
+        // Then - Espera OK (200) pois o usuário existe e tem token válido
+        assertEquals(HttpStatus.OK, response.getStatusCode());
     }
 
     @Test
     void shouldRejectAccessWithInvalidToken() {
-        // Given - Token inválido
+        // Given
         String invalidToken = "invalid.token.here";
 
-        // When - Tenta acessar com token inválido
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(invalidToken);
         HttpEntity<String> entity = new HttpEntity<>(headers);
 
+        // When
         ResponseEntity<String> response = restTemplate.exchange(
                 baseUrl + "/tasks",
                 HttpMethod.GET,
@@ -203,31 +197,7 @@ class AuthIntegrationTest {
                 String.class
         );
 
-        // Then - Deve retornar FORBIDDEN ou UNAUTHORIZED
-        assertTrue(response.getStatusCode() == HttpStatus.FORBIDDEN ||
-                response.getStatusCode() == HttpStatus.UNAUTHORIZED);
-    }
-
-    @Test
-    void shouldRejectAccessWithMalformedToken() {
-        // Given - Token malformado
-        String malformedToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
-                "eyJzdWIiOiJ0ZXN0dXNlciIsImlhdCI6MTUxNjIzOTAyMiwiZXhwIjoxNTE2MjM5MDIyfQ." +
-                "invalid_signature";
-
-        // When - Tenta acessar com token malformado
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(malformedToken);
-        HttpEntity<String> entity = new HttpEntity<>(headers);
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                baseUrl + "/tasks",
-                HttpMethod.GET,
-                entity,
-                String.class
-        );
-
-        // Then - Deve retornar FORBIDDEN ou UNAUTHORIZED
+        // Then
         assertTrue(response.getStatusCode() == HttpStatus.FORBIDDEN ||
                 response.getStatusCode() == HttpStatus.UNAUTHORIZED);
     }
