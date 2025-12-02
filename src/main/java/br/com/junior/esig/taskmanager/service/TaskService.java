@@ -19,6 +19,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -34,15 +35,9 @@ public class TaskService {
 
     public List<TaskResponse> findAll() {
         User currentUser = getLoggedUser();
-
-        List<Task> tasks;
-        if (currentUser.getRole() == Role.ROLE_ADMIN) {
-            log.info("Admin {} listando TODAS as tarefas", currentUser.getUsername());
-            tasks = taskRepository.findAll();
-        } else {
-            log.info("Usuário {} listando SUAS tarefas", currentUser.getUsername());
-            tasks = taskRepository.findByUser(currentUser);
-        }
+        List<Task> tasks = (currentUser.getRole() == Role.ROLE_ADMIN)
+                ? taskRepository.findAll()
+                : taskRepository.findByUser(currentUser);
 
         return tasks.stream()
                 .map(taskMapper::toResponse)
@@ -51,33 +46,21 @@ public class TaskService {
 
     public TaskResponse findById(Long id) {
         Task task = buscarTaskPorId(id);
-
-        // Verifica permissão (Admin ou Dono)
         checkPermission(task, getLoggedUser());
-
         return taskMapper.toResponse(task);
     }
 
     @Transactional
     public TaskResponse create(TaskRequest request) {
         User currentUser = getLoggedUser();
-        User targetUser;
-
-        // Regra: Se for ADMIN, pode criar para qualquer um (usa o ID do JSON).
-        // Se for USER, cria obrigatoriamente para si mesmo (ignora o ID do JSON).
-        if (currentUser.getRole() == Role.ROLE_ADMIN && request.getUserId() != null) {
-            targetUser = buscarUsuario(request.getUserId());
-        } else {
-            targetUser = currentUser;
-        }
+        User targetUser = (currentUser.getRole() == Role.ROLE_ADMIN && request.getUserId() != null)
+                ? buscarUsuario(request.getUserId())
+                : currentUser;
 
         log.info("Criando task: '{}' para o usuário: {}", request.getTitle(), targetUser.getUsername());
 
         Task task = taskMapper.toEntity(request, targetUser);
-
-        if (task.getStatus() == null) {
-            task.setStatus(TaskStatus.TODO);
-        }
+        if (task.getStatus() == null) task.setStatus(TaskStatus.TODO);
 
         return taskMapper.toResponse(taskRepository.save(task));
     }
@@ -86,19 +69,11 @@ public class TaskService {
     public TaskResponse update(Long id, TaskRequest request) {
         Task task = buscarTaskPorId(id);
         User currentUser = getLoggedUser();
-
-        // 1. Verifica se pode mexer nessa task
         checkPermission(task, currentUser);
 
-        // 2. Define quem será o dono da tarefa atualizada
-        User targetUser;
-        if (currentUser.getRole() == Role.ROLE_ADMIN && request.getUserId() != null) {
-            targetUser = buscarUsuario(request.getUserId()); // Admin pode trocar o dono
-        } else {
-            targetUser = task.getUser(); // Usuário comum não pode transferir a tarefa para outro
-        }
-
-        log.info("Atualizando task ID: {}", id);
+        User targetUser = (currentUser.getRole() == Role.ROLE_ADMIN && request.getUserId() != null)
+                ? buscarUsuario(request.getUserId())
+                : task.getUser();
 
         task.setTitle(request.getTitle());
         task.setDescription(request.getDescription());
@@ -115,10 +90,7 @@ public class TaskService {
     public TaskResponse partialUpdate(Long id, Map<String, Object> updates) {
         Task task = buscarTaskPorId(id);
         User currentUser = getLoggedUser();
-
         checkPermission(task, currentUser);
-
-        log.info("Atualização parcial (PATCH) task ID: {}", id);
 
         updates.forEach((key, value) -> {
             if (value != null) {
@@ -130,16 +102,13 @@ public class TaskService {
                     case "deadline" -> task.setDeadline(LocalDate.parse((String) value));
                     case "status" -> task.setStatus(TaskStatus.valueOf(((String) value).toUpperCase()));
                     case "userId" -> {
-                        // Apenas Admin pode trocar o dono via PATCH
                         if (currentUser.getRole() == Role.ROLE_ADMIN) {
-                            Long userId = Long.valueOf(value.toString());
-                            task.setUser(buscarUsuario(userId));
+                            task.setUser(buscarUsuario(Long.valueOf(value.toString())));
                         }
                     }
                 }
             }
         });
-
         return taskMapper.toResponse(taskRepository.save(task));
     }
 
@@ -147,69 +116,106 @@ public class TaskService {
     public void delete(Long id) {
         Task task = buscarTaskPorId(id);
         checkPermission(task, getLoggedUser());
-
         taskRepository.deleteById(id);
-        log.info("Task ID {} deletada", id);
     }
 
     @Transactional
     public TaskResponse completeTask(Long id) {
         Task task = buscarTaskPorId(id);
         checkPermission(task, getLoggedUser());
-
         task.setStatus(TaskStatus.DONE);
         return taskMapper.toResponse(taskRepository.save(task));
     }
 
     public List<TaskResponse> findByUserId(Long userId) {
         User currentUser = getLoggedUser();
-
-        // Se for usuário comum, ele só pode buscar as dele mesmo.
-        // Se tentar buscar de outro ID (/user/5 sendo que eu sou 2), leva erro.
         if (currentUser.getRole() != Role.ROLE_ADMIN && !currentUser.getId().equals(userId)) {
-            throw new AccessDeniedException("Você não tem permissão para ver tarefas de outro usuário.");
+            throw new AccessDeniedException("Acesso negado.");
         }
-
         if (!userRepository.existsById(userId)) {
             throw new ResourceNotFoundException("User", "id", userId);
         }
-
         return taskRepository.findByUserId(userId).stream()
                 .map(taskMapper::toResponse)
                 .collect(Collectors.toList());
     }
 
-    // =================================================================================
-    // MÉTODOS AUXILIARES PRIVADOS (A Lógica de Ouro)
-    // =================================================================================
+    // ============ MÉTODOS DE FILTRO E BUSCA ============
+
+    public List<TaskResponse> filterTasks(TaskStatus status, Priority priority, String responsible, LocalDate startDate, LocalDate endDate) {
+        User currentUser = getLoggedUser();
+        List<Task> tasks = (currentUser.getRole() == Role.ROLE_ADMIN)
+                ? taskRepository.findAll()
+                : taskRepository.findByUser(currentUser);
+
+        return tasks.stream()
+                .filter(t -> (status == null || t.getStatus() == status))
+                .filter(t -> (priority == null || t.getPriority() == priority))
+                .filter(t -> (responsible == null || (t.getResponsible() != null && t.getResponsible().toLowerCase().contains(responsible.toLowerCase()))))
+                .filter(t -> (startDate == null || (t.getDeadline() != null && !t.getDeadline().isBefore(startDate))))
+                .filter(t -> (endDate == null || (t.getDeadline() != null && !t.getDeadline().isAfter(endDate))))
+                .sorted(Comparator.comparing(Task::getPriority).reversed()) // Alta prioridade primeiro
+                .map(taskMapper::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<TaskResponse> findByStatus(TaskStatus status) {
+        User user = getLoggedUser();
+        List<Task> tasks = (user.getRole() == Role.ROLE_ADMIN)
+                ? taskRepository.findByStatus(status)
+                : taskRepository.findByUserAndStatus(user, status);
+        return convertList(tasks);
+    }
+
+    public List<TaskResponse> findByPriority(Priority priority) {
+        User user = getLoggedUser();
+        List<Task> tasks = (user.getRole() == Role.ROLE_ADMIN)
+                ? taskRepository.findByPriority(priority)
+                : taskRepository.findByUserAndPriority(user, priority);
+        return convertList(tasks);
+    }
+
+    public List<TaskResponse> findUpcomingTasks() {
+        User user = getLoggedUser();
+        LocalDate today = LocalDate.now();
+        LocalDate nextWeek = today.plusDays(7);
+        List<Task> tasks = (user.getRole() == Role.ROLE_ADMIN)
+                ? taskRepository.findByDeadlineBetween(today, nextWeek)
+                : taskRepository.findByUserAndDeadlineBetween(user, today, nextWeek);
+        return convertList(tasks);
+    }
+
+    public List<TaskResponse> findOverdueTasks() {
+        User user = getLoggedUser();
+        LocalDate today = LocalDate.now();
+        List<Task> tasks = (user.getRole() == Role.ROLE_ADMIN)
+                ? taskRepository.findByDeadlineBeforeAndStatusNot(today, TaskStatus.DONE)
+                : taskRepository.findByUserAndDeadlineBeforeAndStatusNot(user, today, TaskStatus.DONE);
+        return convertList(tasks);
+    }
+
+    // ============ HELPER METHODS ============
+
+    private List<TaskResponse> convertList(List<Task> tasks) {
+        return tasks.stream().map(taskMapper::toResponse).collect(Collectors.toList());
+    }
 
     private Task buscarTaskPorId(Long id) {
-        return taskRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Task", "id", id));
+        return taskRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Task", "id", id));
     }
 
     private User buscarUsuario(Long userId) {
-        return userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        return userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
     }
 
     private User getLoggedUser() {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "username", username));
+        return userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User", "username", username));
     }
 
-    /**
-     * Valida se o usuário tem permissão para acessar a tarefa.
-     * Regra: Deve ser ADMIN ou o DONO da tarefa.
-     */
     private void checkPermission(Task task, User user) {
-        boolean isAdmin = user.getRole() == Role.ROLE_ADMIN;
-        boolean isOwner = task.getUser().getId().equals(user.getId());
-
-        if (!isAdmin && !isOwner) {
-            log.warn("Acesso negado: Usuário {} tentou acessar task {} de outro dono.", user.getUsername(), task.getId());
-            throw new AccessDeniedException("Você não tem permissão para acessar ou modificar esta tarefa.");
+        if (user.getRole() != Role.ROLE_ADMIN && !task.getUser().getId().equals(user.getId())) {
+            throw new AccessDeniedException("Acesso negado.");
         }
     }
 }

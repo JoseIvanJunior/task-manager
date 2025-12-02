@@ -18,22 +18,35 @@ public class SwaggerConfig {
     public OpenAPI customOpenAPI() {
         return new OpenAPI()
                 .servers(List.of(
-                        new Server().url("/api").description("API Server")
+                        new Server()
+                                .url("http://localhost:8081/api")
+                                .description("Servidor Local com Context Path /api")
                 ))
                 .info(new Info()
-                        .title("Task Manager API")
-                        .description("API de Gerenciamento de Tarefas - Desafio Técnico ESIG")
+                        .title("Task Manager API - ESIG Challenge")
+                        .description("""
+                            API completa de gerenciamento de tarefas com autenticação JWT.
+                            
+                            ## Acesso:
+                            - **Swagger UI**: http://localhost:8081/api/swagger-ui.html
+                            - **OpenAPI JSON**: http://localhost:8081/api/api-docs
+                            
+                            ## Autenticação:
+                            1. Faça login em `/auth/login` ou registre-se em `/auth/register`
+                            2. Copie o token retornado
+                            3. Clique no botão "Authorize" no topo do Swagger
+                            4. Digite: `Bearer seu_token_aqui`
+                            """)
                         .version("1.0.0"))
-                .addSecurityItem(new SecurityRequirement().addList("Bearer Authentication"))
+                .addSecurityItem(new SecurityRequirement().addList("JWT"))
                 .components(new Components()
-                        .addSecuritySchemes("Bearer Authentication", createAPIKeyScheme()));
-    }
-
-    private SecurityScheme createAPIKeyScheme() {
-        return new SecurityScheme()
-                .type(SecurityScheme.Type.HTTP)
-                .bearerFormat("JWT")
-                .scheme("bearer")
-                .description("Adicione o token JWT no formato: Bearer {token}");
+                        .addSecuritySchemes("JWT",
+                                new SecurityScheme()
+                                        .name("JWT")
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")
+                                        .description("Insira o token JWT no formato: Bearer {token}")
+                        ));
     }
 }

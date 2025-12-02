@@ -12,8 +12,14 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Collection;
 
 @Slf4j
 @Service
@@ -25,6 +31,7 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final AuthenticationManager authenticationManager;
 
+    @Transactional
     public LoginResponse login(LoginRequest request) {
         log.info("Autenticando usuário: {}", request.getUsername());
 
@@ -35,18 +42,37 @@ public class AuthService {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         String token = jwtUtil.generateToken(request.getUsername());
 
-        return new LoginResponse(token);
+        // Obter role do usuário autenticado
+        String role = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .findFirst()
+                .orElse("ROLE_USER");
+
+        return new LoginResponse(token, role);
     }
 
+    @Transactional
     public LoginResponse register(LoginRequest request) {
         return createUser(request, Role.ROLE_USER);
     }
 
-    public void createAdmin(LoginRequest request) {
-        createUser(request, Role.ROLE_ADMIN);
+    @Transactional
+    public LoginResponse createAdmin(LoginRequest request) {
+        // Verificar se o usuário atual é ADMIN
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!isAdmin) {
+            throw new AccessDeniedException("Apenas administradores podem criar outros administradores");
+        }
+
+        LoginResponse response = createUser(request, Role.ROLE_ADMIN);
         log.info("Novo ADMINISTRADOR criado: {}", request.getUsername());
+        return response;
     }
 
+    @Transactional
     private LoginResponse createUser(LoginRequest request, Role role) {
         log.info("Criando novo usuário: {} com perfil {}", request.getUsername(), role);
 
@@ -63,6 +89,6 @@ public class AuthService {
         userRepository.save(user);
 
         String token = jwtUtil.generateToken(user.getUsername());
-        return new LoginResponse(token);
+        return new LoginResponse(token, role.name());
     }
 }

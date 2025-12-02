@@ -28,6 +28,5 @@ public class TaskRequest {
 
     private TaskStatus status;
 
-    @NotNull(message = "User ID é obrigatório")
     private Long userId;
 }

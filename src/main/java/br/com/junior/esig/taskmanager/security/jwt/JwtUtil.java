@@ -14,17 +14,27 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    // Chave secreta em Base64 (Gerada para teste, em prod estaria no application.properties)
-    // Essa string abaixo é "MinhaChaveSecretaSuperSeguraParaOProjetoEsig2025" convertida para Base64
-    @Value("${jwt.secret:TWluaGFDaGF2ZVNlY3JldGFTdXBlclNlZ3VyYVBhcmFPUHJvamV0b0VzaWcyMDI1}")
+    @Value("${jwt.secret}")
     private String secret;
 
     @Value("${jwt.expiration:86400000}")
     private Long expiration;
 
     private SecretKey getSigningKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secret);
-        return Keys.hmacShaKeyFor(keyBytes);
+        try {
+            // Se o secret estiver em Base64, decode; caso contrário, usa como está
+            if (secret.matches("^[A-Za-z0-9+/]+=*$") && secret.length() % 4 == 0) {
+                byte[] keyBytes = Decoders.BASE64.decode(secret);
+                return Keys.hmacShaKeyFor(keyBytes);
+            } else {
+                // Se não for Base64, converte a string para bytes
+                byte[] keyBytes = secret.getBytes();
+                return Keys.hmacShaKeyFor(keyBytes);
+            }
+        } catch (Exception e) {
+            log.error("Erro ao criar chave de assinatura JWT: {}", e.getMessage());
+            throw new IllegalArgumentException("Chave JWT inválida", e);
+        }
     }
 
     public String generateToken(String username) {
@@ -51,16 +61,23 @@ public class JwtUtil {
             log.error("Token JWT não suportado: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
             log.error("Claims JWT vazios: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Erro ao validar token: {}", e.getMessage());
         }
         return false;
     }
 
     public String getUsernameFromToken(String token) {
-        return Jwts.parser()
-                .verifyWith(getSigningKey())
-                .build()
-                .parseSignedClaims(token)
-                .getPayload()
-                .getSubject();
+        try {
+            return Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload()
+                    .getSubject();
+        } catch (Exception e) {
+            log.error("Erro ao extrair username do token: {}", e.getMessage());
+            throw new JwtException("Token inválido");
+        }
     }
 }

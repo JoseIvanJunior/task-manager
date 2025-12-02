@@ -41,7 +41,8 @@ public class Task {
     @Enumerated(EnumType.STRING)
     private TaskStatus status;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    // ✅ CORREÇÃO CRÍTICA: FetchType.EAGER evita o LazyInitializationException no Mapper
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id")
     private User user;
 
